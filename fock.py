@@ -84,6 +84,8 @@ class FourierParameterization(Parameterization):
         fx(t) = \sum_j Ax_j * cos(j*t + Px_j)
     where j runs from 0 to num_terms-1;
     Ax and Px are arrays of parameters with num_terms entries.
+    Note that for j=0, only Ax_0 is allowed to vary and Px_0 is always kept
+    zero to avoid over-parameterization.
     All the parameters are packed into a single parameter vector in the
     way like np.concatenate((Ac, Pc, Ar, Pr, Ab, Pb))
     """
@@ -95,7 +97,10 @@ class FourierParameterization(Parameterization):
         Return the three coefficent functions fc, fr, fb based on param_vec
         """
         # unpack the parameter vector
-        Ac, Pc, Ar, Pr, Ab, Pb = param_vec.reshape((6,-1))
+        param_c, param_r, param_b = param_vec.reshape((3,-1))
+        Pc, Ac = np.split(np.insert(param_c, 0, 0.0), 2)
+        Pr, Ar = np.split(np.insert(param_r, 0, 0.0), 2)
+        Pb, Ab = np.split(np.insert(param_b, 0, 0.0), 2)
 
         j = np.arange(self.num_terms)
         fc = lambda t, *_: np.sum(Ac * np.cos(j*t+Pc))
@@ -108,11 +113,14 @@ class FourierParameterization(Parameterization):
         """
         Return an array of 6*num_terms random number from 0 to 1
         """
-        return np.random.rand((6*self.num_terms))
+        return np.random.rand(6*self.num_terms-3)
 
     def parse_parameters(self, param_vec):
         # unpack the parameter vector
-        Ac, Pc, Ar, Pr, Ab, Pb = param_vec.reshape((6,-1))
+        param_c, param_r, param_b = param_vec.reshape((3,-1))
+        Pc, Ac = np.split(np.insert(param_c, 0, 0.0), 2)
+        Pr, Ar = np.split(np.insert(param_r, 0, 0.0), 2)
+        Pb, Ab = np.split(np.insert(param_b, 0, 0.0), 2)
 
         output = '\nFourierParameterization\n'
         output = output + 'fc(t) = \sum_j Ac_j * cos(j*t + Pc_j)\n'
@@ -308,16 +316,16 @@ if __name__ == '__main__':
     cavity_freq = 2*np.pi * 1.0
     gate_time = 1.0
 
-    e, g = get_ion_state_generators(num_focks)
+    g, e = get_ion_state_generators(num_focks)
 
-    target_state = g(0) + 1j * e(0)
+    target_state = g(0)
 
     ion_trap = IonTrap(target_state.unit(), num_focks, rabi_freq, lamb_dicke, \
                        atom_freq, cavity_freq, gate_time)
 
     #parameterization = CarrierParameterization()
-    #parameterization = FourierParameterization(num_terms=4)
-    parameterization = PiecewiseParameterization(num_intervals=1, gate_time=gate_time)
+    parameterization = FourierParameterization(num_terms=2)
+    #parameterization = PiecewiseParameterization(num_intervals=1, gate_time=gate_time)
 
     opt_result = ion_trap.optimize(parameterization)
     opt_param_vec = opt_result.x # optimized parameter vector
