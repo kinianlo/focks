@@ -8,27 +8,18 @@ Created on Mon Jul  8 15:33:28 2019
 
 from qutip import basis, tensor
 
-class IonStateFactory:
+def get_ion_state_generators(num_focks):
     """
-    Provide a concise way to generate ion trap states.
+    Return a 2-tuple of two functions (ground, excited).
+    The excited function generates an excited state in the n-th Fock state. 
+    The ground function generates an ground state in the n-th Fock state. 
+    
+    It's cutomary to name the excited and ground functions e and g respectively
+    in actual use, for instance:
+    e, g = get_ion_state_generators(5)
+    To get a |g2> state use g(2)
+    To get a |e3> state use e(3)
     """
-    def __init__(self, num_focks):
-        self.num_focks = num_focks
+    return (lambda n: tensor(basis(2, 1), basis(num_focks, n)), \
+            lambda n: tensor(basis(2, 0), basis(num_focks, n)))
 
-    def exd(self, n_fock):
-        """
-        Return an excited state in the n_fock Fock state
-        """
-        self._verify_n_fock(n_fock)
-        return tensor(basis(2, 0), basis(self.num_focks, n_fock))
-
-    def gnd(self, n_fock):
-        """
-        Return a ground state in the n_fock Fock state
-        """
-        self._verify_n_fock(n_fock)
-        return tensor(basis(2, 1), basis(self.num_focks, n_fock))
-
-    def _verify_n_fock(self, n_fock):
-        if n_fock >= self.num_focks:
-            raise ValueError('n_fock must be less then num_focks')
