@@ -13,6 +13,10 @@ import matplotlib.pyplot as plt
 from utils import get_ion_state_generators
 
 
+from matplotlib import rc
+rc('font',**{'family':'sans-serif','sans-serif':['Helvetica'], 'size':16})
+rc('text', usetex=True)
+
 class Parameterization:
     """
     The abstract class for parameterizations of coefficient functions.
@@ -290,11 +294,11 @@ class IonTrap:
         ax_fb.plot(times, np.vectorize(fb)(times), 'b')
         ax_fidelity.plot(result.times, result.expect[0])
 
-        ax_fc.set_ylabel('f_c')
-        ax_fr.set_ylabel('f_r')
-        ax_fb.set_ylabel('f_b')
-        ax_fidelity.set_ylabel('fidelity')
-        ax_fidelity.set_xlabel('time')
+        ax_fc.set_ylabel(r'$f_c$', rotation='horizontal')
+        ax_fr.set_ylabel(r'$f_r$', rotation='horizontal')
+        ax_fb.set_ylabel(r'$f_b$', rotation='horizontal')
+        ax_fidelity.set_ylabel(r'fidelity')
+        ax_fidelity.set_xlabel(r'time')
 
         ax_fidelity.set_ylim(-0.1,1.1)
         ax_fidelity.set_xlim(np.min(times), np.max(times))
@@ -318,14 +322,14 @@ if __name__ == '__main__':
 
     g, e = get_ion_state_generators(num_focks)
 
-    target_state = g(0)
+    target_state = e(1)
 
     ion_trap = IonTrap(target_state.unit(), num_focks, rabi_freq, lamb_dicke, \
                        atom_freq, cavity_freq, gate_time)
 
     #parameterization = CarrierParameterization()
-    parameterization = FourierParameterization(num_terms=2)
-    #parameterization = PiecewiseParameterization(num_intervals=1, gate_time=gate_time)
+    parameterization = FourierParameterization(num_terms=1)
+    #parameterization = PiecewiseParameterization(num_intervals=4, gate_time=gate_time)
 
     opt_result = ion_trap.optimize(parameterization)
     opt_param_vec = opt_result.x # optimized parameter vector
