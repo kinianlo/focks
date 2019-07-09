@@ -57,7 +57,7 @@ class CarrierParameterization(Parameterization):
         fr and fb are always zeros, where fc is allowed to be a
         time-independent constant parameter
         """
-        fc = lambda t, *_: param_vec[0]
+        fc = lambda t, *_: param_vec
         fr = lambda t, *_: 0
         fb = lambda t, *_: 0
         return (fc, fr, fb)
@@ -70,7 +70,7 @@ class CarrierParameterization(Parameterization):
 
     def parse_parameters(self, param_vec):
         output = '\nCarrierParameterization\n'
-        output = output + 'fc(t) = {}\n'.format(param_vec[0])
+        output = output + 'fc(t) = {}\n'.format(param_vec)
         output = output + 'fr(t) = {}\n'.format(0.0)
         output = output + 'fb(t) = {}\n'.format(0.0)
 
@@ -281,8 +281,8 @@ class IonTrap:
         obs = [self.target_state.proj()]
         result = self._evolve(coef_functions, num_samples=1000, observables=obs)
 
-        fig, axes = plt.subplots(4, 1, sharex=True)
-        ax_fc, ax_fr, ax_fb, ax_fidelity = axes
+        fig1, axes1 = plt.subplots(4, 1, sharex=True)
+        ax_fc, ax_fr, ax_fb, ax_fidelity = axes1
         times = result.times
 
         ax_fc.plot(times, np.vectorize(fc)(times), 'g')
@@ -304,7 +304,28 @@ class IonTrap:
         ax_fb.grid()
         ax_fidelity.grid()
 
-        fig.align_ylabels(axes)
+        fig1.align_ylabels(axes1)
+
+        obs = []
+        for n in range(self.num_focks):
+            obs.append(tensor(basis(2,1), basis(self.num_focks, n)).proj()) # |0>
+            obs.append(tensor(basis(2,0), basis(self.num_focks, n)).proj()) # |1>
+
+        result = self._evolve(coef_functions, num_samples=1000, observables=obs)
+        times = result.times
+
+        fig2, axes2 = plt.subplots(self.num_focks, 2, sharex=True, sharey=True)
+
+        for n in range(self.num_focks):
+            axes2[self.num_focks-1-n][0].plot(times, result.expect[2*n])
+            axes2[self.num_focks-1-n][1].plot(times, result.expect[2*n+1])
+
+            axes2[self.num_focks-1-n][0].set_ylabel('|{}>'.format(n), rotation='horizontal')
+
+        axes2[0][0].set_ylim(-0.1, 1.1)
+        axes2[0][0].set_title('ground')
+        axes2[0][1].set_title('excited')
+
 
 
 if __name__ == '__main__':
@@ -318,14 +339,14 @@ if __name__ == '__main__':
 
     g, e = get_ion_state_generators(num_focks)
 
-    target_state = e(2)
+    target_state = g(1) + 1j * g(2)
 
     ion_trap = IonTrap(target_state.unit(), num_focks, rabi_freq, lamb_dicke, \
                        atom_freq, cavity_freq, gate_time)
 
     #parameterization = CarrierParameterization()
-    parameterization = FourierParameterization(num_terms=3)
-    #parameterization = PiecewiseParameterization(num_intervals=1, gate_time=gate_time)
+    #parameterization = FourierParameterization(num_terms=3)
+    parameterization = PiecewiseParameterization(num_intervals=4, gate_time=gate_time)
 
     opt_result = ion_trap.optimize(parameterization)
     opt_param_vec = opt_result.x # optimized parameter vector
