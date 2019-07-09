@@ -187,7 +187,7 @@ class PiecewiseParameterization(Parameterization):
         for j in range(self.num_intervals):
             t_j = j*self.gate_time/self.num_intervals
             t_jp1 = (j+1)*self.gate_time/self.num_intervals
-            output = output + '{}\t{}\t{:.3e}\t{:.3e}\t{:.3e}\n'.format(t_j, t_jp1, Ac[j], Ar[j], Ab[j])
+            output = output + '{:.3}\t{:.3}\t{:.3e}\t{:.3e}\t{:.3e}\n'.format(t_j, t_jp1, Ac[j], Ar[j], Ab[j])
 
         print(output)
 
@@ -309,7 +309,7 @@ class IonTrap:
 
 if __name__ == '__main__':
     # physical parameters
-    num_focks = 3
+    num_focks = 4
     rabi_freq = 2*np.pi * 1.0
     lamb_dicke = 0.1
     atom_freq = 2*np.pi * 1.0
@@ -318,13 +318,13 @@ if __name__ == '__main__':
 
     g, e = get_ion_state_generators(num_focks)
 
-    target_state = g(0)
+    target_state = e(0)
 
     ion_trap = IonTrap(target_state.unit(), num_focks, rabi_freq, lamb_dicke, \
                        atom_freq, cavity_freq, gate_time)
 
     #parameterization = CarrierParameterization()
-    parameterization = FourierParameterization(num_terms=2)
+    parameterization = FourierParameterization(num_terms=1)
     #parameterization = PiecewiseParameterization(num_intervals=1, gate_time=gate_time)
 
     opt_result = ion_trap.optimize(parameterization)
