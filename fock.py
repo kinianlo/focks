@@ -81,13 +81,13 @@ class FourierParameterization(Parameterization):
     """
     A parameterization based on fourier series
     Here x stands for any colour (c, b, r):
-        fx(t) = \sum_j Ax_j * cos(j*t + Px_j)
+        fx(t) = \sum_j Px_j * cos(j*t) + Ax_j * sin(j*t)
     where j runs from 0 to num_terms-1;
     Ax and Px are arrays of parameters with num_terms entries.
     Note that for j=0, only Ax_0 is allowed to vary and Px_0 is always kept
     zero to avoid over-parameterization.
     All the parameters are packed into a single parameter vector in the
-    way like np.concatenate((Ac, Pc, Ar, Pr, Ab, Pb))
+    way like np.concatenate((Pc, Ac, Pr, Ar, Pb, Ab))
     """
     def __init__(self, num_terms):
         self.num_terms = num_terms
@@ -103,9 +103,9 @@ class FourierParameterization(Parameterization):
         Pb, Ab = np.split(np.insert(param_b, 0, 0.0), 2)
 
         j = np.arange(self.num_terms)
-        fc = lambda t, *_: np.sum(Ac * np.cos(j*t+Pc))
-        fr = lambda t, *_: np.sum(Ar * np.cos(j*t+Pr))
-        fb = lambda t, *_: np.sum(Ab * np.cos(j*t+Pb))
+        fc = lambda t, *_: np.sum(Pc * np.cos(j*t) + Ac * np.sin(j*t))
+        fr = lambda t, *_: np.sum(Pr * np.cos(j*t) + Ar * np.sin(j*t))
+        fb = lambda t, *_: np.sum(Pb * np.cos(j*t) + Ab * np.sin(j*t))
 
         return (fc, fr, fb)
 
@@ -123,9 +123,9 @@ class FourierParameterization(Parameterization):
         Pb, Ab = np.split(np.insert(param_b, 0, 0.0), 2)
 
         output = '\nFourierParameterization\n'
-        output = output + 'fc(t) = \sum_j Ac_j * cos(j*t + Pc_j)\n'
-        output = output + 'fr(t) = \sum_j Ar_j * cos(j*t + Pr_j)\n'
-        output = output + 'fb(t) = \sum_j Ab_j * cos(j*t + Pb_j)\n'
+        output = output + 'fc(t) = \sum_j Pc_j * cos(j*t) + Ac_j * sin(J*t)\n'
+        output = output + 'fr(t) = \sum_j Pr_j * cos(j*t) + Ar_j * sin(J*t)\n'
+        output = output + 'fb(t) = \sum_j Pb_j * cos(j*t) + Ab_j * sin(J*t)\n'
 
         output = output + '\ncarrier transition:\n'
         output = output + 'j\tAc\t\tPc\n'
@@ -318,13 +318,13 @@ if __name__ == '__main__':
 
     g, e = get_ion_state_generators(num_focks)
 
-    target_state = e(1)
+    target_state = e(2)
 
     ion_trap = IonTrap(target_state.unit(), num_focks, rabi_freq, lamb_dicke, \
                        atom_freq, cavity_freq, gate_time)
 
     #parameterization = CarrierParameterization()
-    parameterization = FourierParameterization(num_terms=1)
+    parameterization = FourierParameterization(num_terms=3)
     #parameterization = PiecewiseParameterization(num_intervals=1, gate_time=gate_time)
 
     opt_result = ion_trap.optimize(parameterization)
