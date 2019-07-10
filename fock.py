@@ -103,9 +103,9 @@ class FourierParameterization(Parameterization):
         Pb, Ab = np.split(np.insert(param_b, 0, 0.0), 2)
 
         j = np.arange(self.num_terms)
-        fc = lambda t, *_: np.sum(Pc * np.cos(j*t) + Ac * np.sin(j*t))
-        fr = lambda t, *_: np.sum(Pr * np.cos(j*t) + Ar * np.sin(j*t))
-        fb = lambda t, *_: np.sum(Pb * np.cos(j*t) + Ab * np.sin(j*t))
+        fc = lambda t, *_: np.sum(Pc * np.cos(np.pi*j*t) + Ac * np.sin(np.pi*j*t))
+        fr = lambda t, *_: np.sum(Pr * np.cos(np.pi*j*t) + Ar * np.sin(np.pi*j*t))
+        fb = lambda t, *_: np.sum(Pb * np.cos(np.pi*j*t) + Ab * np.sin(np.pi*j*t))
 
         return (fc, fr, fb)
 
@@ -216,12 +216,12 @@ class IonTrap:
         self.gate_time = gate_time
         self._parameterization = None
 
-    def optimize(self, parameterization):
+    def optimize(self, parameterization, method='BFGS'):
         """
         Optimize the distance to target given the specific parameterization
         """
         self._parameterization = parameterization
-        result = minimize(self._dist_to_target, parameterization.init_parameters())
+        result = minimize(self._dist_to_target, parameterization.init_parameters(), method=method)
         return result
 
     def _evolve(self, coef_functions, num_samples=2, observables=[]):
@@ -305,6 +305,7 @@ class IonTrap:
         ax_fidelity.grid()
 
         fig1.align_ylabels(axes1)
+        fig1.tight_layout()
 
         obs = []
         for n in range(self.num_focks):
@@ -314,21 +315,29 @@ class IonTrap:
         result = self._evolve(coef_functions, num_samples=1000, observables=obs)
         times = result.times
 
-        fig2, axes2 = plt.subplots(self.num_focks, 2, sharex=True, sharey=True)
+        fig2, axes2 = plt.subplots(self.num_focks+1, 1, sharex=True)
 
         for n in range(self.num_focks):
-            axes2[self.num_focks-1-n][0].plot(times, result.expect[2*n])
-            axes2[self.num_focks-1-n][1].plot(times, result.expect[2*n+1])
+            axes2[self.num_focks-1-n].plot(times, result.expect[2*n])
+            axes2[self.num_focks-1-n].plot(times, result.expect[2*n+1])
 
-            axes2[self.num_focks-1-n][0].set_ylabel('|{}>'.format(n), rotation='horizontal')
+            axes2[self.num_focks-1-n].set_ylabel('|{}> '.format(n), rotation='horizontal')
+            axes2[self.num_focks-1-n].set_ylim(-0.1, 1.1)
+            axes2[self.num_focks-1-n].grid()
 
-        axes2[0][0].set_ylim(-0.1, 1.1)
-        axes2[0][0].set_title('ground')
-        axes2[0][1].set_title('excited')
+        axes2[-1].plot(times, np.vectorize(fc)(times), 'g')
+        axes2[-1].plot(times, np.vectorize(fr)(times), 'r')
+        axes2[-1].plot(times, np.vectorize(fb)(times), 'b')
+
+        axes2[-1].set_ylabel('f_x')
+        axes2[-1].grid()
+
+        fig2.tight_layout()
 
 
 
 if __name__ == '__main__':
+    from time import process_time
     # physical parameters
     num_focks = 4
     rabi_freq = 2*np.pi * 1.0
@@ -339,19 +348,23 @@ if __name__ == '__main__':
 
     g, e = get_ion_state_generators(num_focks)
 
-    target_state = g(1) + 1j * g(2)
+    target_state = g(0) + 1j * g(1)
 
     ion_trap = IonTrap(target_state.unit(), num_focks, rabi_freq, lamb_dicke, \
                        atom_freq, cavity_freq, gate_time)
 
     #parameterization = CarrierParameterization()
-    #parameterization = FourierParameterization(num_terms=3)
-    parameterization = PiecewiseParameterization(num_intervals=4, gate_time=gate_time)
+    #parameterization = FourierParameterization(num_terms=4)
+    parameterization = PiecewiseParameterization(num_intervals=3, gate_time=gate_time)
 
-    opt_result = ion_trap.optimize(parameterization)
+    start = process_time()
+    opt_result = ion_trap.optimize(parameterization, 'Nelder-Mead')
+    end = process_time()
+
     opt_param_vec = opt_result.x # optimized parameter vector
 
     print(opt_result.message)
+    print('CPU time used: {}'.format(end-start))
     parameterization.parse_parameters(opt_param_vec)
     # Plot the dynamics of the ion under the optimized Hamiltonian
     ion_trap.plot_dynamics(opt_param_vec, parameterization)
