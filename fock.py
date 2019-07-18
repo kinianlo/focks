@@ -1,30 +1,54 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu Jul  4 15:42:46 2019
+Created on Tue Jul 16 09:01:37 2019
 
 @author: kin
 """
 
-from qutip import *
-from scipy.optimize import minimize
 import numpy as np
+from scipy.optimize import minimize
+from qutip import tensor, basis, qeye, sigmax, sigmay, sigmaz, sigmap, sigmam, \
+create, destroy, mesolve, sesolve
 import matplotlib.pyplot as plt
 from utils import get_ion_state_generators
-
 
 class Parameterization:
     """
     The abstract class for parameterizations of coefficient functions.
     Coefficient functions refers to the three time-dependent functions
-    which control the Hamiltonian H = fc(t)*Hc + fr(t)*Hr + fb(t)*Hb,
-    where Hc, Hr and Hb are the Hamiltonians for carrier, red-band and
-    blue-band transitions respectively.
-
-    The main purpose of this class is to specify the parameterization,
-    i.e. how a parameter vector p is mapped to fc, fr, fb.
+    which control the Hamiltonian
+    H = fc*sigam_+ + fr*sigma_+ a^dagger + fb*sigma_+ a + h.c..
     """
-    def coef_functions(self, param_vec):
+    def __init__(self, num_focks):
+        self.num_focks = num_focks
+
+        Sp = tensor(sigmap(), qeye(self.num_focks))
+        a = tensor(qeye(2), destroy(self.num_focks))
+        self._Hc_half = Sp
+        self._Hr_half = Sp * a
+        self._Hb_half = Sp * a.dag()
+
+
+    def _get_half_Hamiltonians(self):
+        """
+        Return
+        """
+        return self._Hc_half, self._Hr_half, self._Hb_half
+
+    def init_param_vec(self):
+        """
+        Return an initial parameter vector for optimization.
+        """
+        raise NotImplementedError
+
+    def unpack_param_vec(self, param_vec):
+        """
+        Unpack a parameter vector into a more manageable form
+        """
+        raise NotImplementedError
+
+    def strengths(self, param_vec):
         """
         Return a tuple of three functions (fc, fr, fb) based on the parameter
         vector param_vec.
@@ -34,9 +58,16 @@ class Parameterization:
         """
         raise NotImplementedError
 
-    def init_parameters(self):
+    def evolve(self, init_state, param_vec):
         """
-        Return an initial parameter vectorr for optimization.
+        Return the evolved state.
+        """
+        raise NotImplementedError
+
+    def observe(self, init_state, param_vec, times, e_ops=[]):
+        """
+        Evolve the init_state given the param_vec for a duration of gate_time.
+        Return a qutip.solver.Result objection
         """
         raise NotImplementedError
 
@@ -47,135 +78,66 @@ class Parameterization:
         raise NotImplementedError
 
 
-class CarrierParameterization(Parameterization):
-    """
-    A simple parameterization with only a constant strength carrier transition.
-    Mainly for testing.
-    """
-    def coef_functions(self, param_vec):
-        """
-        fr and fb are always zeros, where fc is allowed to be a
-        time-independent constant parameter
-        """
-        fc = lambda t, *_: param_vec
-        fr = lambda t, *_: 0
-        fb = lambda t, *_: 0
-        return (fc, fr, fb)
-
-    def init_parameters(self):
-        """
-        Return a numpy array of only a random number from 0 to 1
-        """
-        return np.array([np.random.rand()])
-
-    def parse_parameters(self, param_vec):
-        output = '\nCarrierParameterization\n'
-        output = output + 'fc(t) = {}\n'.format(param_vec)
-        output = output + 'fr(t) = {}\n'.format(0.0)
-        output = output + 'fb(t) = {}\n'.format(0.0)
-
-        print(output)
-
-
-class FourierParameterization(Parameterization):
-    """
-    A parameterization based on fourier series
-    Here x stands for any colour (c, b, r):
-        fx(t) = \sum_j Px_j * cos(j*t) + Ax_j * sin(j*t)
-    where j runs from 0 to num_terms-1;
-    Ax and Px are arrays of parameters with num_terms entries.
-    Note that for j=0, only Ax_0 is allowed to vary and Px_0 is always kept
-    zero to avoid over-parameterization.
-    All the parameters are packed into a single parameter vector in the
-    way like np.concatenate((Pc, Ac, Pr, Ar, Pb, Ab))
-    """
-    def __init__(self, num_terms):
-        self.num_terms = num_terms
-
-    def coef_functions(self, param_vec):
-        """
-        Return the three coefficent functions fc, fr, fb based on param_vec
-        """
-        # unpack the parameter vector
-        param_c, param_r, param_b = param_vec.reshape((3,-1))
-        Pc, Ac = np.split(np.insert(param_c, 0, 0.0), 2)
-        Pr, Ar = np.split(np.insert(param_r, 0, 0.0), 2)
-        Pb, Ab = np.split(np.insert(param_b, 0, 0.0), 2)
-
-        j = np.arange(self.num_terms)
-        fc = lambda t, *_: np.sum(Pc * np.cos(np.pi*j*t) + Ac * np.sin(np.pi*j*t))
-        fr = lambda t, *_: np.sum(Pr * np.cos(np.pi*j*t) + Ar * np.sin(np.pi*j*t))
-        fb = lambda t, *_: np.sum(Pb * np.cos(np.pi*j*t) + Ab * np.sin(np.pi*j*t))
-
-        return (fc, fr, fb)
-
-    def init_parameters(self):
-        """
-        Return an array of 6*num_terms random number from 0 to 1
-        """
-        return np.random.rand(6*self.num_terms-3)
-
-    def parse_parameters(self, param_vec):
-        # unpack the parameter vector
-        param_c, param_r, param_b = param_vec.reshape((3,-1))
-        Pc, Ac = np.split(np.insert(param_c, 0, 0.0), 2)
-        Pr, Ar = np.split(np.insert(param_r, 0, 0.0), 2)
-        Pb, Ab = np.split(np.insert(param_b, 0, 0.0), 2)
-
-        output = '\nFourierParameterization\n'
-        output = output + 'fc(t) = \sum_j Pc_j * cos(j*t) + Ac_j * sin(J*t)\n'
-        output = output + 'fr(t) = \sum_j Pr_j * cos(j*t) + Ar_j * sin(J*t)\n'
-        output = output + 'fb(t) = \sum_j Pb_j * cos(j*t) + Ab_j * sin(J*t)\n'
-
-        output = output + '\ncarrier transition:\n'
-        output = output + 'j\tAc\t\tPc\n'
-        for j in range(self.num_terms):
-            output = output + '{}\t{:.3e}\t{:.3e}\n'.format(j, Ac[j], Pc[j])
-
-        output = output + '\nred-sideband transition:\n'
-        output = output + 'j\tAr\t\tPr\n'
-        for j in range(self.num_terms):
-            output = output + '{}\t{:.3e}\t{:.3e}\n'.format(j, Ar[j], Pr[j])
-
-        output = output + '\nblue-sidband transition:\n'
-        output = output + 'j\tAb\t\tPb\n'
-        for j in range(self.num_terms):
-            output = output + '{}\t{:.3e}\t{:.3e}\n'.format(j, Ab[j], Pb[j])
-
-        print(output)
-
-class PiecewiseParameterization(Parameterization):
-    """
-    A simple parameterization by diving the gate time into a number of
-    num_intervals equal-time intervals. In each interval the value of the
-    coefficent functions are constant specified by the parameters Ac, Ar and Ab,
-    where Ac is an array of num_intervals entries, and similar for Ar and Ab.
-    All the parameters are packed into a single parameter vector in the
-    way like np.concatenate((Ac, Ar, Ab))
-    """
-    def __init__(self, num_intervals, gate_time):
+class PiecewiseConstant(Parameterization):
+    def __init__(self, num_focks, num_intervals):
+        Parameterization.__init__(self, num_focks)
         self.num_intervals = num_intervals
-        self.gate_time = gate_time
 
-    def coef_functions(self, param_vec):
-        # unpack the parameter vector
-        Ac, Ar, Ab = param_vec.reshape((3,-1))
-        fc = lambda t, *_: Ac[np.mod(int(t/self.gate_time*self.num_intervals), self.num_intervals)]
-        fr = lambda t, *_: Ar[np.mod(int(t/self.gate_time*self.num_intervals), self.num_intervals)]
-        fb = lambda t, *_: Ab[np.mod(int(t/self.gate_time*self.num_intervals), self.num_intervals)]
-
-        return (fc, fr, fb)
-
-    def init_parameters(self):
+    def init_param_vec(self):
         """
-        Return an array of 3*num_intervals random numbers from 0 to 1
+        Return an array of 6*num_intervals random numbers from 0 to 1
         """
-        return np.random.rand((3*(self.num_intervals)))
-        #return np.zeros(3*(self.num_intervals+1))
+        return np.random.rand((6*(self.num_intervals)))
+
+    def unpack_param_vec(self, param_vec):
+        rAc, iAc, rAr, iAr, rAb, iAb = param_vec.reshape((6,-1))
+        Ac = rAc + 1j * iAc
+        Ar = rAr + 1j * iAr
+        Ab = rAb + 1j * iAb
+        return Ac, Ar, Ab
+
+    def strengths(self, param_vec):
+        Ac, Ar, Ab = self.unpack_param_vec(param_vec)
+
+        fc = lambda t, *_: Ac[np.mod(int(t*self.num_intervals), self.num_intervals)]
+        fr = lambda t, *_: Ar[np.mod(int(t*self.num_intervals), self.num_intervals)]
+        fb = lambda t, *_: Ab[np.mod(int(t*self.num_intervals), self.num_intervals)]
+
+        return fc, fr, fb
+
+    def evolve(self, init_state, param_vec):
+        Ac, Ar, Ab = self.unpack_param_vec(param_vec)
+        Hc, Hr, Hb = self._get_half_Hamiltonians()
+
+        state = init_state
+        for j in range(self.num_intervals):
+            H = Ac[j] * Hc + Ar[j] * Hr + Ab[j] * Hb
+            H = H + H.dag()
+            state = ((-1j/self.num_intervals)*H).expm() * state
+
+#            interval_times = [j / self.num_intervals, (j+1) /self.num_intervals]
+#            result = sesolve(H, state, interval_times)
+#            state = result.states[-1]
+        return state
+
+    def observe(self, init_state, param_vec, times, e_ops=[]):
+        Hc, Hr, Hb = self._get_half_Hamiltonians()
+
+        fc, fr, fb = self.strengths(param_vec)
+        fccj = lambda t, *_: np.conj(fc(t))
+        frcj = lambda t, *_: np.conj(fr(t))
+        fbcj = lambda t, *_: np.conj(fb(t))
+        H = [[Hc, fc], [Hr, fr], [Hb, fb], [Hc.dag(), fccj], [Hr.dag(), frcj], [Hb.dag(), fbcj]]
+        result = mesolve(H, init_state, times, [], e_ops)
+
+        if e_ops == []:
+            return result.states
+        else:
+            return result.expect
 
     def parse_parameters(self, param_vec):
         # unpack the parameter vector
-        Ac, Ar, Ab = param_vec.reshape((3,-1))
+        Ac, Ar, Ab = self.unpack_param_vec(param_vec)
 
         output = '\nPiecewiseParameterization\n'
         output = output + 'fc(t) = \sum_j Ac_j * Heaviside(t-t_j) * Heaviside(t_{j+1}-t)\n'
@@ -185,186 +147,144 @@ class PiecewiseParameterization(Parameterization):
         output = output + '\ncarrier transition:\n'
         output = output + 't_j\tt_{j+1}\tAc\t\tAr\t\tAb\n'
         for j in range(self.num_intervals):
-            t_j = j*self.gate_time/self.num_intervals
-            t_jp1 = (j+1)*self.gate_time/self.num_intervals
+            t_j = j/self.num_intervals
+            t_jp1 = (j+1)/self.num_intervals
             output = output + '{:.3}\t{:.3}\t{:.3e}\t{:.3e}\t{:.3e}\n'.format(t_j, t_jp1, Ac[j], Ar[j], Ab[j])
 
-        print(output)
-
-class IonTrap:
+def plot_dynamics(param_vec, parameterization, init_state, target_state, \
+                  num_focks):
     """
-    Class for an ion trap with all its physical parameters specified.11
-    The ion lives in a simple harmonic oscillator and there is a two-level
-    system internal to the ion itself (which is often realized as a
-    transition between two electronic states). The Hilbert space is thus a
-    tensor product between a two level Hilbert space and a Fock space.
-
-    The time dynamics of interaction with a laser can be simulated.
-    A target state and an initial state can be specfied.
-    One can optimize the parameter vector of a parameterization of choice such
-    that the evloved state is as close as possible to the target state.
+    Plot the fidelity and coefficient functions during the gate time.
     """
-    def __init__(self, target_state, num_focks, rabi_freq, lamb_dicke, \
-                 atom_freq, cavity_freq, gate_time):
-        self.num_focks = num_focks
-        self.target_state = target_state
-        self.init_state = tensor(basis(2, 1), basis(num_focks, 0))
-        self.rabi_freq = rabi_freq
-        self.lamb_dicke = lamb_dicke
-        self.atom_freq = atom_freq
-        self.cavity_freq = cavity_freq
-        self.gate_time = gate_time
-        self._parameterization = None
+    fc, fr, fb = parameterization.strengths(param_vec)
 
-    def optimize(self, parameterization, method='BFGS'):
-        """
-        Optimize the distance to target given the specific parameterization
-        """
-        self._parameterization = parameterization
-        result = minimize(self._dist_to_target, parameterization.init_parameters(), method=method)
-        return result
+    e_ops = []
+    for n in range(num_focks):
+        e_ops.append(tensor(basis(2,1), basis(num_focks, n)).proj()) # |0>
+        e_ops.append(tensor(basis(2,0), basis(num_focks, n)).proj()) # |1>
+    e_ops.append(target_state.proj())
 
-    def _evolve(self, coef_functions, num_samples=2, observables=[]):
-        """
-        Evolve the initial state with Hamiltonian
-        fc(t)*Hc + fr(t)*Hr + fb(t)*Hb, where (fc, fr, fb) given by
-        coef_functions.
+    times = np.linspace(0, 1, 1000)
+    expect = parameterization.observe(init_state, param_vec, times, e_ops)
 
-        num_samples refers to the number observations made during the
-        evolution of the system.
+    fig, axes = plt.subplots(num_focks+2, 1, sharex=True)
 
-        observables is a list of operators for oberservations. If observables
-        is empty then the complete states are sampled during the evolution.
+    for n in range(num_focks):
+        axes[num_focks-1-n].plot(times, expect[2*n], alpha=0.7, label='ground')
+        axes[num_focks-1-n].plot(times, expect[2*n+1], alpha=0.7, label='excited')
 
-        A qutip.Result object directly from the solver is returned.
-        """
-        Sx = tensor(sigmax(), qeye(self.num_focks))
-        Sz = tensor(sigmaz(), qeye(self.num_focks))
-        Sp = tensor(sigmap(), qeye(self.num_focks))
-        Sm = tensor(sigmam(), qeye(self.num_focks))
-        a = tensor(qeye(2), destroy(self.num_focks))
-        adag = a.dag()
+        axes[num_focks-1-n].set_ylabel('|{}> '.format(n), rotation='horizontal')
+        axes[num_focks-1-n].set_ylim(-0.1, 1.1)
+        axes[num_focks-1-n].grid()
 
-        fc, fr, fb = coef_functions
+    axes[0].legend()
 
-        Hc = 0.5 * self.rabi_freq * Sx
-        Hr = 0.5j * self.lamb_dicke * self.rabi_freq * (Sp * a - Sm * adag)
-        Hb = 0.5j * self.lamb_dicke * self.rabi_freq * (Sp * adag - Sm * a)
+    axes[-2].plot(times, np.abs(np.vectorize(fc)(times))/np.pi, 'g', alpha=0.7)
+    axes[-2].plot(times, np.abs(np.vectorize(fr)(times))/np.pi, 'r', alpha=0.7)
+    axes[-2].plot(times, np.abs(np.vectorize(fb)(times))/np.pi, 'b', alpha=0.7)
 
-        H = [[Hc, fc], [Hr, fr], [Hb, fb]]
+    axes[-2].set_ylabel('strength/pi')
+    axes[-2].grid()
 
-        times = np.linspace(0, self.gate_time, num_samples)
+    axes[-1].semilogy(times, 1-expect[-1])
+    axes[-1].set_ylabel('infidelity')
+    axes[-1].set_xlabel('time')
+    axes[-1].grid()
 
-        result = mesolve(H, self.init_state, times, [], observables)
+    if isinstance(parameterization, PiecewiseConstant):
+        axes[-1].xaxis.set_ticks(np.linspace(0, 1, parameterization.num_intervals+1))
 
-        return result
+def plot_fidelity_num_intervals(target_state, num_intervals_range, num_repeats):
+    num_focks = max(num_intervals_range)+1
+    g, e = get_ion_state_generators(num_focks)
+    init_state = g(0)
 
-    def _dist_to_target(self, param_vec):
-        """
-        Evolve the initial state given the parameter vector AND
-        return the distance to the target state
-        """
-        coef_functions = self._parameterization.coef_functions(param_vec)
+    all_errors = []
 
-        result = self._evolve(coef_functions)
-        final_state = result.states[-1]
-        dist = 1-expect(self.target_state.proj(), final_state)
-        return dist
+    for num_intervals in num_intervals_range:
+        errors = []
+        parameterization = PiecewiseConstant(num_focks, num_intervals)
+        for i in range(num_repeats):
+            def dist(param_vec):
+                evolved_state = parameterization.evolve(init_state, param_vec)
+                return 1-np.abs(target_state.overlap(evolved_state))**2
+            opt_result = minimize(dist, parameterization.init_param_vec(),
+                                      options={'disp':True})
+            opt_param_vec = opt_result.x
+            evolved_state = parameterization.evolve(init_state, opt_param_vec)
+            errors.append(1-np.abs(target_state.overlap(evolved_state))**2)
+        all_errors.append(errors)
 
-    def plot_dynamics(self, param_vec, parameterization):
-        """
-        Plot the fidelity and coefficient functions during the gate time.
-        """
-        coef_functions = parameterization.coef_functions(param_vec)
-        fc, fr, fb = coef_functions
-
-        obs = [self.target_state.proj()]
-        result = self._evolve(coef_functions, num_samples=1000, observables=obs)
-
-        fig1, axes1 = plt.subplots(4, 1, sharex=True)
-        ax_fc, ax_fr, ax_fb, ax_fidelity = axes1
-        times = result.times
-
-        ax_fc.plot(times, np.vectorize(fc)(times), 'g')
-        ax_fr.plot(times, np.vectorize(fr)(times), 'r')
-        ax_fb.plot(times, np.vectorize(fb)(times), 'b')
-        ax_fidelity.plot(result.times, result.expect[0])
-
-        ax_fc.set_ylabel('f_c', rotation='horizontal')
-        ax_fr.set_ylabel('f_r', rotation='horizontal')
-        ax_fb.set_ylabel('f_b', rotation='horizontal')
-        ax_fidelity.set_ylabel('fidelity')
-        ax_fidelity.set_xlabel('time')
-
-        ax_fidelity.set_ylim(-0.1,1.1)
-        ax_fidelity.set_xlim(np.min(times), np.max(times))
-
-        ax_fc.grid()
-        ax_fr.grid()
-        ax_fb.grid()
-        ax_fidelity.grid()
-
-        fig1.align_ylabels(axes1)
-        fig1.tight_layout()
-
-        obs = []
-        for n in range(self.num_focks):
-            obs.append(tensor(basis(2,1), basis(self.num_focks, n)).proj()) # |0>
-            obs.append(tensor(basis(2,0), basis(self.num_focks, n)).proj()) # |1>
-
-        result = self._evolve(coef_functions, num_samples=1000, observables=obs)
-        times = result.times
-
-        fig2, axes2 = plt.subplots(self.num_focks+1, 1, sharex=True)
-
-        for n in range(self.num_focks):
-            axes2[self.num_focks-1-n].plot(times, result.expect[2*n])
-            axes2[self.num_focks-1-n].plot(times, result.expect[2*n+1])
-
-            axes2[self.num_focks-1-n].set_ylabel('|{}> '.format(n), rotation='horizontal')
-            axes2[self.num_focks-1-n].set_ylim(-0.1, 1.1)
-            axes2[self.num_focks-1-n].grid()
-
-        axes2[-1].plot(times, np.vectorize(fc)(times), 'g')
-        axes2[-1].plot(times, np.vectorize(fr)(times), 'r')
-        axes2[-1].plot(times, np.vectorize(fb)(times), 'b')
-
-        axes2[-1].set_ylabel('f_x')
-        axes2[-1].grid()
-
-        fig2.tight_layout()
-
+    fig, ax = plt.subplots(1,1)
+    for i in range(len(num_intervals_range)):
+        ax.scatter([num_intervals_range[i]]*num_repeats, all_errors[i])
 
 
 if __name__ == '__main__':
     from time import process_time
-    # physical parameters
-    num_focks = 4
-    rabi_freq = 2*np.pi * 1.0
-    lamb_dicke = 0.1
-    atom_freq = 2*np.pi * 1.0
-    cavity_freq = 2*np.pi * 1.0
-    gate_time = 1.0
 
+    NELDER_MEAD = 'nelder-mead'
+    BFGS = 'BFGS'
+    POWERLL = 'Powell'
+
+
+#    num_repeats = 3
+#    target_state = (g(3)+g(4)).unit()
+#    num_intervals_range = range(1, 5)
+#    num_focks = max(num_intervals_range)+2
+#    g, e = get_ion_state_generators(num_focks)
+#    init_state = g(0)
+#
+#    all_errors = []
+#
+#    for num_intervals in num_intervals_range:
+#        print('num_intervals:{}'.format(num_intervals))
+#        errors = []
+#        parameterization = PiecewiseConstant(num_focks, num_intervals)
+#        for i in range(num_repeats):
+#            print('run#{}'.format(i))
+#            def dist(param_vec):
+#                evolved_state = parameterization.evolve(init_state, param_vec)
+#                return 1-np.abs(target_state.overlap(evolved_state))**2
+#            start = process_time()
+#            opt_result = minimize(dist, parameterization.init_param_vec(),
+#                                      options={'disp':True})
+#            end = process_time()
+#            print('CPU time used: {}'.format(end-start))
+#            opt_param_vec = opt_result.x
+#            evolved_state = parameterization.evolve(init_state, opt_param_vec)
+#            errors.append(1-np.abs(target_state.overlap(evolved_state))**2)
+#        all_errors.append(errors)
+#
+#    fig, ax = plt.subplots(1,1)
+#    ax.set_yscale('log')
+#    ax.set_xlabel('number of intervals')
+#    ax.set_ylabel('indifelity')
+#    for i in range(len(num_intervals_range)):
+#        ax.scatter([num_intervals_range[i]]*num_repeats, all_errors[i])
+
+
+    num_focks = 10
     g, e = get_ion_state_generators(num_focks)
 
-    target_state = g(0) + 1j * g(1)
+    init_state = g(0)
+    target_state = (g(4)).unit()
 
-    ion_trap = IonTrap(target_state.unit(), num_focks, rabi_freq, lamb_dicke, \
-                       atom_freq, cavity_freq, gate_time)
+    num_intervals = 4
+    parameterization = PiecewiseConstant(num_focks, num_intervals)
 
-    #parameterization = CarrierParameterization()
-    #parameterization = FourierParameterization(num_terms=4)
-    parameterization = PiecewiseParameterization(num_intervals=3, gate_time=gate_time)
+    def dist(param_vec):
+        evolved_state = parameterization.evolve(init_state, param_vec)
+        return 1-np.abs(target_state.overlap(evolved_state))**2
 
     start = process_time()
-    opt_result = ion_trap.optimize(parameterization, 'Nelder-Mead')
+    opt_result = minimize(dist, parameterization.init_param_vec(),
+                          options={'disp':True})
     end = process_time()
 
     opt_param_vec = opt_result.x # optimized parameter vector
 
-    print(opt_result.message)
     print('CPU time used: {}'.format(end-start))
     parameterization.parse_parameters(opt_param_vec)
-    # Plot the dynamics of the ion under the optimized Hamiltonian
-    ion_trap.plot_dynamics(opt_param_vec, parameterization)
+
+    plot_dynamics(opt_param_vec, parameterization, init_state, target_state, num_focks)
