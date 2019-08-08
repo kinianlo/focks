@@ -17,15 +17,10 @@ DIFF = 0
 appr_eps = np.finfo(float).eps ** 0.5
 
 
-class Parameterization:
-    """
-    The abstract class for parameterizations of coefficient functions.
-    Coefficient functions refers to the three time-dependent functions
-    which control the Hamiltonian
-    H = fc*sigam_+ + fr*sigma_+ a^dagger + fb*sigma_+ a + h.c..
-    """
-
-    def __init__(self, num_focks):
+class IonTrapSetup:
+    def __init__(self, init_state, target_state, num_focks, num_steps, alpha_1=0):
+        self.init_state = init_state
+        self.target_state = target_state
         self.num_focks = num_focks
 
         Sp = tensor(sigmap(), qeye(num_focks))
@@ -36,52 +31,6 @@ class Parameterization:
         self._ctrl_hamils = [Sp + Sm, Sp * a + Sm * adag, Sp * adag + Sm * a,
                              1j * (Sp - Sm), 1j * (Sp * a - Sm * adag), 1j * (Sp * adag - Sm * a)]
         self._adaga = adag * a
-
-    def init_param_vec(self):
-        """
-        Return an initial parameter vector for optimisation.
-        """
-        raise NotImplementedError
-
-    def unpack_param_vec(self, param_vec):
-        """
-        Unpack a parameter vector into a more manageable form
-        """
-        raise NotImplementedError
-
-    def strengths(self, param_vec):
-        """
-        Return a tuple of three functions (fc, fr, fb) based on the parameter
-        vector param_vec.
-        The functions must take an t argument and a list of arguments *arg,
-        e.g. fc = lambda t, *arg : ***function_output***.
-        The *arg is required by QuTip for additional arguments (if any).
-        """
-        raise NotImplementedError
-
-    def evolve(self, init_state, param_vec):
-        """
-        Return the evolved state.
-        """
-        raise NotImplementedError
-
-    def observe(self, init_state, param_vec, times, e_ops=[]):
-        """
-        Evolve the init_state given the param_vec for a duration of gate_time.
-        Return a qutip.solver.Result objection
-        """
-        raise NotImplementedError
-
-    def parse_parameters(self, param_vec):
-        """
-        Print the parameters in a human readable form.
-        """
-        raise NotImplementedError
-
-
-class PiecewiseConstant(Parameterization):
-    def __init__(self, num_focks, num_steps, alpha_1=0):
-        Parameterization.__init__(self, num_focks)
         self.num_steps = num_steps
         self.alpha1 = alpha_1
 
@@ -249,16 +198,16 @@ def plot_fidelity_num_steps(target_state, num_steps_range, num_repeats):
 
     for num_steps in num_steps_range:
         errors = []
-        parameterization = PiecewiseConstant(num_focks, num_steps)
+        setup = IonTrapSetup(num_focks, num_steps)
         for i in range(num_repeats):
             def dist(param_vec):
-                evolved_state = parameterization.evolve(init_state, param_vec)
+                evolved_state = setup.evolve(init_state, param_vec)
                 return 1 - np.abs(target_state.overlap(evolved_state)) ** 2
 
-            opt_result = minimize(dist, parameterization.init_param_vec(),
+            opt_result = minimize(dist, setup.init_param_vec(),
                                   options={'disp': True})
             opt_param_vec = opt_result.x
-            evolved_state = parameterization.evolve(init_state, opt_param_vec)
+            evolved_state = setup.evolve(init_state, opt_param_vec)
             errors.append(1 - np.abs(target_state.overlap(evolved_state)) ** 2)
         all_errors.append(errors)
 
