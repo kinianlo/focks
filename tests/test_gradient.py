@@ -21,22 +21,22 @@ for n in n_range:
     g, e = get_ion_state_generators(num_focks)
     init_state = g(0)
     target_state = g(n)
-    param = PiecewiseConstant(num_focks, num_steps)
+    setup = IonTrapSetup(num_focks, num_steps)
     err_mag_list = []
     frac_err_list = []
     for i in range(num_repeats):
-        param_vec = param.init_param_vec()
-        grad_anal = param.gradient(param_vec, init_state, target_state)
-        grad_appr = approx_fprime(param_vec, param.target_func,
+        param_vec = setup.init_param_vec()
+        grad_anal = setup.gradient(param_vec, init_state, target_state)
+        grad_appr = approx_fprime(param_vec, setup.target_func,
                                   appr_eps, init_state, target_state)
         err_mag = np.sum((grad_anal - grad_appr) ** 2) ** 0.5
-        frac_err_list.append(err_mag/np.sum(grad_appr**2)**0.5)
+        frac_err_list.append(err_mag / np.sum(grad_appr ** 2) ** 0.5)
         err_mag_list.append(err_mag)
     err_mag_mean.append(np.mean(err_mag_list))
     err_mag_std.append(np.std(err_mag_list))
     frac_err_mean.append(np.mean(frac_err_list))
     frac_err_std.append(np.std(frac_err_list))
-fig, axes = plt.subplots(2, 1, sharex=True)
+fig, axes = plt.subplots(2, 1, sharex='col')
 ax1, ax2 = axes
 
 ax1.errorbar(n_range, err_mag_mean, yerr=err_mag_std)

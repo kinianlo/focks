@@ -126,4 +126,3 @@ class OptimizationRecord:
         ax1.grid()
         ax2.grid()
         fig.show()
-

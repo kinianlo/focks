@@ -1,6 +1,6 @@
 from fock import *
 
-appr_eps = (np.finfo(float).eps)**0.5
+appr_eps = (np.finfo(float).eps) ** 0.5
 
 num_repeats = 10
 grad_mag_mean = []
@@ -13,16 +13,17 @@ for n in n_range:
     g, e = get_ion_state_generators(num_focks)
     init_state = g(0)
     target_state = g(n)
-    param = PiecewiseConstant(num_focks, num_steps, 1e-1)
+
+    setup = IonTrapSetup(num_focks, num_steps, 1e-1)
     grad_mag_list = []
     for i in range(num_repeats):
-        #grad_mag = np.sum(param.gradient(param.init_param_vec(), init_state, target_state) ** 2) ** 0.5
-        grad_mag = np.sum(approx_fprime(param.init_param_vec(), param.target_func, appr_eps,
+        # grad_mag = np.sum(param.gradient(param.init_param_vec(), init_state, target_state) ** 2) ** 0.5
+        grad_mag = np.sum(approx_fprime(setup.init_param_vec(), setup.target_func, appr_eps,
                                         init_state, target_state) ** 2) ** 0.5
         grad_mag_list.append(grad_mag)
     grad_mag_mean.append(np.mean(grad_mag_list))
     grad_mag_std.append(np.std(grad_mag_list))
-fig, axes = plt.subplots(2, 1, sharex=True)
+fig, axes = plt.subplots(2, 1, sharex='col')
 ax1, ax2 = axes
 
 ax1.errorbar(n_range, grad_mag_mean, yerr=grad_mag_std)

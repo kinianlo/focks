@@ -18,7 +18,7 @@ appr_eps = np.finfo(float).eps ** 0.5
 
 
 class IonTrapSetup:
-    def __init__(self, init_state, target_state, num_focks, num_steps, alpha_1=0):
+    def __init__(self, init_state, target_state, num_focks, num_steps, alpha_list=[]):
         self.init_state = init_state
         self.target_state = target_state
         self.num_focks = num_focks
@@ -28,11 +28,13 @@ class IonTrapSetup:
         a = tensor(qeye(2), destroy(num_focks))
         adag = tensor(qeye(2), create(num_focks))
 
+        # Control Hamiltonians
         self._ctrl_hamils = [Sp + Sm, Sp * a + Sm * adag, Sp * adag + Sm * a,
                              1j * (Sp - Sm), 1j * (Sp * a - Sm * adag), 1j * (Sp * adag - Sm * a)]
+        # Number operator
         self._adaga = adag * a
         self.num_steps = num_steps
-        self.alpha1 = alpha_1
+        self.alpha_list = alpha_list + [0] * (1 - len(alpha_list))
 
     def unpack_param_vec(self, param_vec):
         """
@@ -101,14 +103,11 @@ class IonTrapSetup:
             return result.expect
 
     def target_func(self, param_vec, init_state, target_state):
-
         evolved_state = self.evolve(init_state, param_vec)
-        Phi0 = 1 - abs(target_state.overlap(evolved_state)) ** 2
-        if self.alpha1 == 0:
-            return Phi0
-        else:
-            Phi1 = (expect(self._adaga, evolved_state) - expect(self._adaga, target_state)) ** 2
-            return Phi0 + self.alpha1 * Phi1
+        Phi = 1 - abs(target_state.overlap(evolved_state)) ** 2
+        if self.alpha_list[0] != 0:
+            Phi += (expect(self._adaga, evolved_state) - expect(self._adaga, target_state)) ** 2
+        return Phi
 
     def gradient(self, param_vec, init_state, target_state, quick=False, safe=False):
         amps = self.unpack_param_vec(param_vec)
@@ -117,7 +116,7 @@ class IonTrapSetup:
         num_diff = expect(self._adaga, evolved_state) - expect(self._adaga, target_state)
 
         left0 = target_state
-        if self.alpha1 != 0:
+        if self.alpha_list[0] != 0:
             left1 = self._adaga * evolved_state
         right = evolved_state
 
@@ -147,12 +146,12 @@ class IonTrapSetup:
                     exp_Hi = Hi
 
                 grad[j, i] = -2 * DT * np.imag(left0.overlap(exp_Hi * right) * overlap)
-                if self.alpha1 != 0:
-                    grad[j, i] += self.alpha1 * 4 * DT * \
+                if self.alpha_list[0] != 0:
+                    grad[j, i] += self.alpha_list[0] * 4 * DT * \
                                   np.imag(left1.overlap(exp_Hi * right)) * num_diff
 
             left0 = Udag * left0
-            if self.alpha1 != 0:
+            if self.alpha_list[0] != 0:
                 left1 = Udag * left1
             right = Udag * right
 
@@ -187,30 +186,3 @@ class IonTrapSetup:
             t_j = j / self.num_steps
             t_jp1 = (j + 1) / self.num_steps
             output = output + '{:.3}\t{:.3}\t{:.3e}\t{:.3e}\t{:.3e}\n'.format(t_j, t_jp1, Ac[j], Ar[j], Ab[j])
-
-
-def plot_fidelity_num_steps(target_state, num_steps_range, num_repeats):
-    num_focks = max(num_steps_range) + 1
-    g, e = get_ion_state_generators(num_focks)
-    init_state = g(0)
-
-    all_errors = []
-
-    for num_steps in num_steps_range:
-        errors = []
-        setup = IonTrapSetup(num_focks, num_steps)
-        for i in range(num_repeats):
-            def dist(param_vec):
-                evolved_state = setup.evolve(init_state, param_vec)
-                return 1 - np.abs(target_state.overlap(evolved_state)) ** 2
-
-            opt_result = minimize(dist, setup.init_param_vec(),
-                                  options={'disp': True})
-            opt_param_vec = opt_result.x
-            evolved_state = setup.evolve(init_state, opt_param_vec)
-            errors.append(1 - np.abs(target_state.overlap(evolved_state)) ** 2)
-        all_errors.append(errors)
-
-    fig, ax = plt.subplots(1, 1)
-    for i in range(len(num_steps_range)):
-        ax.scatter([num_steps_range[i]] * num_repeats, all_errors[i])

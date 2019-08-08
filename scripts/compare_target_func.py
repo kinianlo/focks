@@ -15,7 +15,7 @@ for n in n_range:
     init_state = g(0)
     target_state = g(n)
 
-    param = PiecewiseConstant(num_focks, num_steps, 0)
+    param = IonTrapSetup(num_focks, num_steps, 0)
     infil_list = []
     for i in range(num_repeats):
         opt_result = minimize(param.target_func, param.init_param_vec(),
@@ -25,7 +25,7 @@ for n in n_range:
     infil_0_mean.append(np.mean(infil_list))
     infil_0_std.append(np.std(infil_list))
 
-    param = PiecewiseConstant(num_focks, num_steps, 1e-1)
+    param = IonTrapSetup(num_focks, num_steps, 1e-1)
     infil_list = []
     for i in range(num_repeats):
         opt_result = minimize(param.target_func, param.init_param_vec(),
