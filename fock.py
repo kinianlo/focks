@@ -106,7 +106,7 @@ class IonTrapSetup:
         evolved_state = self.evolve(init_state, param_vec)
         Phi = 1 - abs(target_state.overlap(evolved_state)) ** 2
         if self.alpha_list[0] != 0:
-            Phi += (expect(self._adaga, evolved_state) - expect(self._adaga, target_state)) ** 2
+            Phi += self.alpha_list[0] * (expect(self._adaga, evolved_state) - expect(self._adaga, target_state)) ** 2
         return Phi
 
     def gradient(self, param_vec, init_state, target_state, quick=False, safe=False):
