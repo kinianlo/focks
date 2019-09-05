@@ -5,8 +5,8 @@ Created on Mon Jul  8 15:33:28 2019
 
 @author: kin
 """
-from qutip import basis, tensor
-from numpy import dot, vectorize, abs, linspace, pi, ceil, mod, zeros, arange, log
+from qutip import basis, tensor, Qobj
+from numpy import dot, empty
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 

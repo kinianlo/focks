@@ -1,4 +1,5 @@
 from fock import *
+import matplotlib.pyplot as plt
 
 """
 Compare the analytic graidents calculated in paramterization.gradient()
@@ -8,20 +9,20 @@ The fock space is truncated at the 2n+5 level.
 Number of steps is n for even n, and n+1 for odd n.
 This is the minimum steps for the analytic algorithm.
 """
-num_repeats = 10
+num_repeats = 5
 err_mag_mean = []
 err_mag_std = []
 frac_err_mean = []
 frac_err_std = []
 
-n_range = range(1, 7)
+n_range = range(1, 10)
 for n in n_range:
     num_focks = n * 2 + 5
     num_steps = n + np.mod(n, 2)
     g, e = get_ion_state_generators(num_focks)
     init_state = g(0)
     target_state = g(n)
-    setup = IonTrapSetup(num_focks, num_steps)
+    setup = IonTrapSetup(init_state, target_state, num_focks, num_steps, alpha_list=[1, 0.0, 0.1])
     err_mag_list = []
     frac_err_list = []
     for i in range(num_repeats):

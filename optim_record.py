@@ -1,9 +1,12 @@
+import os
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 from numpy import linspace, arange, log, vectorize, pi, zeros
 from qutip import tensor, basis
 from utils import get_ion_state_generators
 from numpy.linalg import norm
+from time import strftime, time
+import pickle
 
 
 class OptimizationRecord:
@@ -11,14 +14,21 @@ class OptimizationRecord:
     Storage for an optimzation result
     """
 
-    def __init__(self, setup, optim_result):
+    def __init__(self, setup, optim_result, note=""):
         self.setup = setup
         self.optim_result = optim_result
+        self._history_stored = False
+        self._func_history = []
+        self._grad_history = []
+        self._infidelity_history = []
 
-    def plot_final_dynamics(self):
-        self.plot_dynamics(self.optim_result.allvecs[-1])
+        self._dirpath = ''
+        self.note = note
 
-    def plot_dynamics(self, param_vec):
+    def plot_final_dynamics(self, show_plot=True, save_plot=False):
+        self.plot_dynamics(self.optim_result.allvecs[-1], show_plot=show_plot, save_plot=save_plot)
+
+    def plot_dynamics(self, param_vec, show_plot=True, save_plot=False):
         """
         Plot the fidelity and coefficient functions during the gate time.
         """
@@ -100,6 +110,7 @@ class OptimizationRecord:
                              facecolor='b', alpha=0.2)
 
         axes[2].set_ylabel('strengths/pi')
+        axes[2].set_ylim((0, None))
 
         # sticks at step boundaries
         for i in range(len(axes)):
@@ -110,30 +121,71 @@ class OptimizationRecord:
         axes[1].grid()
         axes[2].grid()
 
-        fig.show()
+        if show_plot:
+            fig.show()
 
-    def plot_history(self, plot_grad=True):
+        if save_plot:
+            fig.tight_layout()
+            fig.savefig(os.path.join(self._dirpath, 'dynamics.pdf'))
+
+    def plot_history(self, show_plot=True, save_plot=False):
         setup = self.setup
         func_history = []
+        infidelity_history = []
         grad_history = []
 
-        for param_vec in self.optim_result.allvecs:
-            func_history.append(setup.target_func(param_vec, setup.init_state, setup.target_state))
-            grad_history.append(norm(setup.gradient(param_vec, setup.init_state, setup.target_state)))
+        if self._history_stored:
+            func_history = self._func_history
+            grad_history = self._grad_history
+            infidelity_history = self._infidelity_history
+        else:
+            for param_vec in self.optim_result.allvecs:
+                func_history.append(setup.target_func(param_vec, setup.init_state, setup.target_state))
+                infidelity_history.append(setup.infidelity(param_vec, setup.init_state, setup.target_state))
+                grad_history.append(norm(setup.gradient(param_vec, setup.init_state, setup.target_state)))
+            self._history_stored = True
 
         fig, axes = plt.subplots(2, 1, sharex='col')
         ax1, ax2 = axes
 
         ax1.plot(range(len(func_history)), func_history)
-        ax1.scatter(range(len(func_history)), func_history, marker='x')
+        ax1.scatter(range(len(func_history)), func_history, marker='.', alpha=0.5, label="target function")
+        ax1.plot(range(len(infidelity_history)), infidelity_history)
+        ax1.scatter(range(len(infidelity_history)), infidelity_history, marker='.', alpha=0.5, label="infidelity")
         ax2.plot(range(len(grad_history)), grad_history)
-        ax2.scatter(range(len(grad_history)), grad_history, marker='x')
+        ax2.scatter(range(len(grad_history)), grad_history, marker='.', alpha=0.5)
 
-        ax1.set_ylabel('target function')
+        ax1.legend()
         ax2.set_ylabel('gradient norm')
         ax2.set_xlabel('iteration')
         ax1.set_yscale('log')
         ax2.set_yscale('log')
         ax1.grid()
         ax2.grid()
-        fig.show()
+
+        if show_plot:
+            fig.show()
+
+        if save_plot:
+            fig.tight_layout()
+            fig.savefig(os.path.join(self._dirpath, 'history.pdf'))
+
+    def save(self, filepath=None):
+
+        num_errors = 0
+        while num_errors < 10:
+            dirpath = '{}/urop/optim_record/{}_{}/'.format(str(os.path.expanduser('~')), strftime("%Y-%m-%d/%H-%M-%S"), str(time()).replace('.', ''))
+            try:
+                os.makedirs(os.path.dirname(dirpath))
+                self._dirpath = dirpath
+                break
+            except FileExistsError:
+                num_errors += 1
+                continue
+        else:
+            print('Record not saved since number of errors reached the limit.')
+
+        pickle.dump(self, open(os.path.join(dirpath, 'record.pickle'), 'wb'))
+
+
+

@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Jul 16 09:01:37 2019
-
-@author: kin
-"""
-
 import numpy as np
 from numpy.linalg import eigh
 from scipy.optimize import minimize, approx_fprime
@@ -28,12 +20,16 @@ class IonTrapSetup:
         adag = tensor(qeye(2), create(num_focks))
 
         # Control Hamiltonians
-        self._ctrl_hamils = [Sp + Sm, Sp * a + Sm * adag, Sp * adag + Sm * a,
-                             1j * (Sp - Sm), 1j * (Sp * a - Sm * adag), 1j * (Sp * adag - Sm * a)]
+        self._ctrl_ops = [Sp + Sm, Sp * a + Sm * adag, Sp * adag + Sm * a,
+                          1j * (Sp - Sm), 1j * (Sp * a - Sm * adag), 1j * (Sp * adag - Sm * a)]
         # Number operator
         self._adaga = adag * a
         self.num_steps = num_steps
         self.alpha_list = np.array(alpha_list + [0] * (3 - len(alpha_list)))
+
+    @property.getter
+    def control_operators(self):
+        return self._ctrl_ops
 
     def unpack_param_vec(self, param_vec):
         """
@@ -85,7 +81,7 @@ class IonTrapSetup:
         for j in range(self.num_steps):
             H = 0
             for i in range(6):
-                H += amps[j, i] * self._ctrl_hamils[i]
+                H += amps[j, i] * self._ctrl_ops[i]
             state = ((-1j / self.num_steps) * H).expm() * state
         return state
 
@@ -93,7 +89,7 @@ class IonTrapSetup:
         amps_func = self.get_amps_func(param_vec)
         H = []
         for i in range(6):
-            H.append([self._ctrl_hamils[i], amps_func[i]])
+            H.append([self._ctrl_ops[i], amps_func[i]])
         result = sesolve(H, init_state, times, e_ops)
 
         if e_ops == []:
@@ -165,7 +161,7 @@ class IonTrapSetup:
         for j in reversed(range(self.num_steps)):
             H = 0
             for i in range(6):
-                H += amps[j, i] * self._ctrl_hamils[i]
+                H += amps[j, i] * self._ctrl_ops[i]
             Udag = ((1j * DT) * H).expm()
 
             # Diagonalise H
@@ -176,7 +172,7 @@ class IonTrapSetup:
 
             for i in range(6):
                 # prepare the "average" control Hamil Hi
-                Hi = self._ctrl_hamils[i]
+                Hi = self._ctrl_ops[i]
                 expt_Hi = Qobj(transform(e_kets, E * transform(e_kets.conj().T, Hi.full())), dims=Hi.dims)
 
                 grad[j, i] = 0
