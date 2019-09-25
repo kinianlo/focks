@@ -1,220 +1,181 @@
 from focks.interaction import LaserInteraction
-from qutip import Qobj, expect
-from typing import List, Tuple
-from numpy import arctan2, angle, pi, sqrt, exp
+import pickle
+from qutip import expect
 import numpy as np
-import matplotlib.pyplot as plt
+from numpy import arctan2, exp, angle, pi, sqrt
 
 EPS = np.finfo(float).eps
 SQEPS = np.finfo(float).eps ** 0.5
 
-count = 0
-energy_freq = {}
+def find_coupling_stregnth(alpha, beta, target):
+    mag = arctan2(abs(beta), abs(alpha))
+    if target == 'e':
+        phase = exp(+1j * (angle(alpha) - angle(beta) + pi / 2))
+    elif target == 'g':
+        phase = exp(-1j * (angle(alpha) - angle(beta) + pi / 2))
+    else:
+        raise Exception("Aurgment `target` must be 'e' or 'g'")
+    return mag, phase
 
-
-class BranchFactory:
-    def __init__(self, state, highest_fock, interaction):
-
-        self.highest_fock = highest_fock
-        self.interaction = interaction
-        self.state = state
-        n = self.highest_fock
-
-        e, g = interaction.eigenstate_generators
-
-        # prepare for red, use carrier to move into |g n>
+def find_energy_bound(interaction, init_state):
+    num_focks = interaction.num_focks
+    state = init_state
+    # First step: use red all the way to find a upper bound to the minimum energy
+    total_energy = 0
+    pulse_sequence = []
+    e, g = interaction.eigenstate_generators
+    for n in reversed(range(num_focks)):
         alpha = g(n).overlap(state)
         beta = e(n).overlap(state)
 
-        self.coupling_strength_c_r = arctan2(abs(beta), abs(alpha))
-        self.coupling_phase_c_r = exp(-1j * (angle(alpha) - angle(beta) + pi / 2))
+        mag, phase = find_coupling_stregnth(alpha, beta, 'g')
+        amp = mag * phase
+        pulse = [amp, 0, 0]
 
-        self.amp_c_r = self.coupling_strength_c_r * self.coupling_phase_c_r
-        self.evolved_state_c_r = interaction.evolve(state, [self.amp_c_r, 0, 0], 1.0)
-
-        assert abs(e(n).overlap(self.evolved_state_c_r)) < SQEPS
-
-        if n == 0:
-            return
-        # red, move into |e n-1>
-        alpha = e(n - 1).overlap(self.evolved_state_c_r)
-        beta = g(n).overlap(self.evolved_state_c_r)
-
-        self.coupling_strength_r = arctan2(abs(beta), abs(alpha))
-        self.coupling_phase_r = exp(1j * (angle(alpha) - angle(beta) + pi / 2))
-
-        self.amp_r = self.coupling_strength_r / sqrt(n) * self.coupling_phase_r
+        state = interaction.evolve(state, pulse)
+        total_energy += abs(amp)**2 * interaction.lamb_dicke**2
+        pulse_sequence.append(pulse)
 
         if n == 0:
-            return
+            # No need to further apply a red since the state is already at |g0>
+            break
 
-        # prepare for blue, use carrier to move into |e n>
-        alpha = e(n).overlap(state)
+        alpha = e(n-1).overlap(state)
         beta = g(n).overlap(state)
 
-        self.coupling_strength_c_b = arctan2(abs(beta), abs(alpha))
-        self.coupling_phase_c_b = exp(1j * (angle(alpha) - angle(beta) + pi / 2))
+        mag, phase = find_coupling_stregnth(alpha, beta, 'e')
+        amp = mag/sqrt(n) * phase
+        pulse = [0, amp, 0]
 
-        self.amp_c_b = self.coupling_strength_c_b * self.coupling_phase_c_b
+        state = interaction.evolve(state, pulse)
+        total_energy += abs(amp)**2
+        pulse_sequence.append(pulse)
 
-        self.evolved_state_c_b = interaction.evolve(state, [self.amp_c_b, 0, 0], 1.0)
+    assert abs(abs(g(0).overlap(state))**2 - 1) < SQEPS, "Final state should be |g0>"
 
-        assert abs(g(n).overlap(self.evolved_state_c_b)) < SQEPS
+    energy_bound = total_energy
+    pulse_sequence_bound = pulse_sequence
+    print("The upper bound of the minimum energy is:\n{:}".format(energy_bound))
+    print("The upper bound pulse sequence is:")
+    for pulse in pulse_sequence_bound:
+        c_idx = int(np.argmax(np.abs(pulse)))
+        print("{:} {:.5f} {:+.5f}π".format(['c', 'r', 'b'][c_idx], np.abs(pulse[c_idx]), angle(pulse[c_idx]) / pi))
+    return energy_bound, pulse_sequence_bound
 
-        # blue, move into |g n-1>
-        alpha = g(n - 1).overlap(self.evolved_state_c_b)
-        beta = e(n).overlap(self.evolved_state_c_b)
-
-        self.coupling_strength_b = arctan2(abs(beta), abs(alpha))
-        self.coupling_phase_b = exp(-1j * (angle(alpha) - angle(beta) + pi / 2))
-
-        self.amp_b = self.coupling_strength_b / sqrt(n) * self.coupling_phase_b
-
-        self.nth_r = 0
-        self.nth_b = 0
-
-    def next_branch(self):
-        if self.highest_fock == 0:
-            return self.coupling_strength_c_r**2, [(self.amp_c_r, 0, 0)], self.evolved_state_c_r
-
-        eta = self.interaction.lamb_dicke
-        n = self.highest_fock
-
-        energy_r = (self.coupling_strength_r + self.nth_r * pi) ** 2 / n + (self.coupling_strength_c_r*eta)**2
-        energy_b = (self.coupling_strength_b + self.nth_b * pi) ** 2 / n + (self.coupling_strength_c_b*eta)**2
-        if energy_r < energy_b:
-            amp_r = (self.coupling_strength_r + self.nth_r * pi) / sqrt(n) * self.coupling_phase_r
-            evolved_state = self.interaction.evolve(self.evolved_state_c_r, (0, amp_r, 0), 1.0)
-
-            pulses = [(0, amp_r, 0), (self.amp_c_r, 0, 0)]
-            if self.nth_r >= 0:
-                self.nth_r = -self.nth_r-1
-            else:
-                self.nth_r = -self.nth_r
-            return energy_r, pulses, evolved_state
-        else:
-            amp_b = (self.coupling_strength_b + self.nth_b * pi) / sqrt(n) * self.coupling_phase_b
-            evolved_state = self.interaction.evolve(self.evolved_state_c_b, (0, 0, amp_b), 1.0)
-
-            pulses = [(0, 0, amp_b), (self.amp_c_b, 0, 0)]
-            if self.nth_b >=0:
-                self.nth_b = -self.nth_b - 1
-            else:
-                self.nth_b = -self.nth_b
-            return energy_b, pulses, evolved_state
-
-
-def _next_level(state: Qobj,
-                highest_fock: int,
-                used_energy: float,
-                min_energy: List[float],
-                interaction: LaserInteraction) -> Tuple[float, List]:
-    """
-
-    Parameters
-    ----------
-    state: Qobj
-    highest_fock : int
-        The highest occupied (occupation > TOL) fock state.
-    min_energy : list of a single float
-        The minimum energy obtained so far by the depth-first search. The float is protected by the *list* so that
-        it is passed by reference and is shared between all tree nodes.
-    interaction : LaserInteraction
-        The interaction object which provides the evolution of the state.
-
-    Returns
-    -------
-
-
-    """
-    global count, energy_freq
-    count += 1
-    n = highest_fock
-
-    if used_energy > min_energy[0]:
-        return np.inf, []
-
+def find_minimum_energy(interaction, init_state):
     e, g = interaction.eigenstate_generators
+    energy_bound, pulse_sequence_bound = find_energy_bound(interaction, init_state)
+    num_focks = interaction.num_focks
+
+    nodes = [(init_state, [])]
+    new_nodes = []
+    for n in reversed(range(num_focks)):
+        for node in nodes:
+            state, pulse_sequence = node
+            energy = interaction.pulse_sequence_energy(pulse_sequence)
+
+            if energy >= energy_bound:
+                continue
+
+            ###############################################################
+
+            cg_alpha = g(n).overlap(state)
+            cg_beta = e(n).overlap(state)
+            cg_mag, cg_phase = find_coupling_stregnth(cg_alpha, cg_beta, 'g')
+
+            cg_amp = cg_mag * cg_phase
+            cg_pulse = [cg_amp, 0, 0]
+            cg_state = interaction.evolve(state, cg_pulse)
+
+            if n == 0:
+                new_nodes.append((cg_state, pulse_sequence+[cg_pulse]))
+                continue
+
+            ###############################################################
+
+            r_alpha = e(n-1).overlap(cg_state)
+            r_beta = g(n).overlap(cg_state)
+            r_mag, r_phase = find_coupling_stregnth(r_alpha, r_beta, 'e')
+
+            ###############################################################
+
+            r0_amp = r_mag/sqrt(n) * r_phase
+            r0_pulse = [0, r0_amp, 0]
+            r0_state = interaction.evolve(cg_state, r0_pulse)
+
+            new_nodes.append((r0_state, pulse_sequence+[cg_pulse, r0_pulse]))
+
+            ###############################################################
+
+            rn1_amp = (r_mag-pi)/sqrt(n) * r_phase
+            rn1_pulse = [0, rn1_amp, 0]
+            rn1_state = interaction.evolve(cg_state, rn1_pulse)
+
+            new_nodes.append((rn1_state, pulse_sequence+[cg_pulse, rn1_pulse]))
+
+            ###############################################################
+
+            ce_alpha = e(n).overlap(state)
+            ce_beta = g(n).overlap(state)
+            ce_mag, ce_phase = find_coupling_stregnth(ce_alpha, ce_beta, 'e')
+
+            ce_amp = ce_mag * ce_phase
+            ce_pulse = [ce_amp, 0, 0]
+            ce_state = interaction.evolve(state, ce_pulse)
+
+            ###############################################################
+
+            b_alpha = g(n - 1).overlap(ce_state)
+            b_beta = e(n).overlap(ce_state)
+            b_mag, b_phase = find_coupling_stregnth(b_alpha, b_beta, 'g')
+
+            ###############################################################
+
+            b0_amp = b_mag / sqrt(n) * b_phase
+            b0_pulse = [0, 0, b0_amp]
+            b0_state = interaction.evolve(ce_state, b0_pulse)
+
+            new_nodes.append((b0_state, pulse_sequence + [ce_pulse, b0_pulse]))
+
+            ###############################################################
+
+            bn1_amp = (b_mag - pi) / sqrt(n) * b_phase
+            bn1_pulse = [0, 0, bn1_amp]
+            bn1_state = interaction.evolve(ce_state, bn1_pulse)
+
+            new_nodes.append((bn1_state, pulse_sequence + [ce_pulse, bn1_pulse]))
+
+            ###############################################################
+        nodes = new_nodes
+        new_nodes = []
+
+    min_energy = np.inf
+    min_pulse_sequence = None
+
+    for node in nodes:
+        state, pulse_sequence = node
+        assert abs(abs(g(0).overlap(state)) ** 2 - 1) < SQEPS, "Final state should be |g0>"
+        energy = interaction.pulse_sequence_energy(pulse_sequence)
+
+        if energy < min_energy:
+            min_energy = energy
+            min_pulse_sequence = pulse_sequence
 
 
-    # evolve the state to gather all population to |e,n>
-    # use blue to move all population in |e,n> to |g,n-1>
-    # update pulse_sequence to include the two operations above
-    factory = BranchFactory(state, highest_fock, interaction)
-    if n == 0:
-        self_energy, self_pulses, evolved_state = factory.next_branch()
-        total_energy = self_energy + used_energy
-
-        assert abs(g(0).overlap(evolved_state))-1 < SQEPS
-        if "{:5f}".format(total_energy) in energy_freq:
-            energy_freq["{:5f}".format(total_energy)] += 1
-        else:
-            energy_freq["{:5f}".format(total_energy)] = 1
-
-        if total_energy < min_energy[0]:
-            min_energy[0] = total_energy
-        return self_energy, self_pulses
-    energy = np.inf
-    pulse_sequence = None
-    #while True:
-    for i in range(3):
-        self_energy, self_pulses, evolved_state = factory.next_branch()
-        if self_energy + used_energy >= min_energy[0]:
-            break
-        child_energy, child_pulses = _next_level(evolved_state, n - 1, self_energy+used_energy, min_energy, interaction)
-        if child_energy < energy:
-            energy = child_energy + self_energy
-            pulse_sequence = child_pulses + self_pulses
-
-    return energy, pulse_sequence
-
-
-def find_pulse_sequence(target_state: Qobj, interaction):
-    assert len(target_state.dims[0]) == 2, "Target state should be a tensor product state."
-    assert target_state.dims[0][0] == 2, "The first space should be a 2-dimensional space."
-    num_focks = target_state.dims[0][1]
-
-    e, g = interaction.eigenstate_generators
-    highest_fock = num_focks - 1
-    while expect(e(highest_fock).proj() + g(highest_fock).proj(), target_state) < 3 * SQEPS and highest_fock >= 0:
-        highest_fock -= 1
-
-    energy, pulse_sequence = _next_level(target_state, highest_fock, 0, [np.inf], interaction)
-
-    return energy, pulse_sequence
-
+    return min_energy, min_pulse_sequence
 
 if __name__ == '__main__':
-    N = 10
-    interaction = LaserInteraction(N, 0.1)
+    init_state = pickle.load(open('/home/kin/urop/focks/data/states/fl4.pickle', 'rb'))
+    num_focks = init_state.dims[0][1]
+
+    lamb_dicke = 0.1
+    interaction = LaserInteraction(num_focks, lamb_dicke)
     e, g = interaction.eigenstate_generators
 
-    import pickle
-    state = pickle.load(open('/home/kin/urop/focks/data/states/ca10.pickle', 'rb'))
+    minimum_energy, minimum_pulse_sequence = find_minimum_energy(interaction, init_state)
 
-    #state = interaction.get_random_state()
-    energy, pulse_sequence = find_pulse_sequence((state).unit(), interaction)
-    print(energy)
-
-    for pulse in pulse_sequence:
-        c_idx = np.argmax(np.abs(pulse))
-        print("{:} {:.3f} {:+.3f}π".format(['c', 'r', 'b'][c_idx], np.abs(pulse[c_idx]), angle(pulse[c_idx]) / pi))
-
-    # print(count)
-    # print(energy_freq)
-
-    # avg_energies = []
-    # N_range = range(2, 10)
-    # for N in N_range:
-    #     interaction = LaserInteraction(N)
-    #     energies = []
-    #     for i in range(100):
-    #         energy, pulse_sequence = find_pulse_sequence(interaction.get_random_state())
-    #         energies.append(energy)
-    #     avg_energies.append(np.mean(energies))
-    #
-    #     plt.hist(energies, bins=10)
-    #     plt.title("N={:} avg:{:}".format(N, np.mean(energies)))
-    #     plt.show()
-    # plt.plot(N_range, avg_energies)
-    # plt.show()
+    print("The minimum energy is:\n{:}".format(minimum_energy))
+    print("The minimum energy pulse sequence is:")
+    for pulse in minimum_pulse_sequence:
+        c_idx = int(np.argmax(np.abs(pulse)))
+        print("{:} {:.5f} {:+.5f}π".format(['c', 'r', 'b'][c_idx], np.abs(pulse[c_idx]), angle(pulse[c_idx]) / pi))

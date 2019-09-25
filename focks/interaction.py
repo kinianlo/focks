@@ -106,7 +106,7 @@ class LaserInteraction:
     def evolve(self,
                init_state: Qobj,
                amps: List[Union[complex, Callable[[float], complex]]],
-               duration: float) -> Qobj:
+               duration: float = 1.0) -> Qobj:
         """
         Return the evolved state under a set of control amplitudes.
 
@@ -168,7 +168,7 @@ class LaserInteraction:
         """
         if np.count_nonzero(amps) == 0:
             return init_state
-        #H = self.interaction_hamiltonian(amps)
+        # H = self.interaction_hamiltonian(amps)
         H = 0
         for i in range(3):
             if amps[i] == 0:
@@ -256,3 +256,9 @@ class LaserInteraction:
             return sesolve(H_td, init_state, times, []).states
         else:
             return sesolve(H_td, init_state, times, observables).expect
+
+    def pulse_sequence_energy(self, pulse_sequence):
+        if len(pulse_sequence) == 0:
+            return 0
+        eta = self._lamb_dicke
+        return np.sum(np.abs(pulse_sequence) ** 2 * np.array([eta ** 2, 1, 1]))

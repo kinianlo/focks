@@ -12,7 +12,8 @@ SQEPS = np.finfo(float).eps ** 0.5
 def piecewise_constant_dynamics(interaction: LaserInteraction,
                                 pulse_sequence: List,
                                 init_state: Qobj,
-                                target_state: Qobj=None):
+                                target_state: Qobj,
+                                energy: float):
     """
     Plot the fidelity and coefficient functions during the gate time.
     """
@@ -20,9 +21,9 @@ def piecewise_constant_dynamics(interaction: LaserInteraction,
     num_focks = interaction.num_focks
     num_steps = len(pulse_sequence)
 
-    fc_list = [pulse[0] for pulse in reversed(pulse_sequence)]
-    fr_list = [pulse[1] for pulse in reversed(pulse_sequence)]
-    fb_list = [pulse[2] for pulse in reversed(pulse_sequence)]
+    fc_list = [pulse[0] for pulse in pulse_sequence]
+    fr_list = [pulse[1] for pulse in pulse_sequence]
+    fb_list = [pulse[2] for pulse in pulse_sequence]
 
     fc = lambda t: fc_list[np.mod(int(t), num_steps)]
     fr = lambda t: fr_list[np.mod(int(t), num_steps)]
@@ -41,7 +42,7 @@ def piecewise_constant_dynamics(interaction: LaserInteraction,
 
     old_num_focks = num_focks
     for i in range(num_focks):
-        if max(max(expect[2 * (num_focks - 1)]), max(expect[2 * (num_focks - 1) + 1])) > SQEPS:
+        if max(max(expect[2 * (num_focks - 1)]), max(expect[2 * (num_focks - 1) + 1])) > SQEPS*1e5:
             break
         num_focks -= 1
 
@@ -130,6 +131,9 @@ def piecewise_constant_dynamics(interaction: LaserInteraction,
     axes[0].grid()
     axes[1].grid(axis='x')
     axes[2].grid()
+
+    if energy:
+        axes[2].set_title('energy: {:}'.format(energy))
 
     show_plot = True
     save_plot = False

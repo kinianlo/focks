@@ -1,5 +1,5 @@
 import numpy as np
-from numpy import dot, vdot
+from numpy import dot, vdot, sqrt
 from numpy.linalg import eigh
 from qutip import Qobj
 
@@ -164,7 +164,7 @@ class InfidelityOptimizer:
                  target_state: Qobj,
                  num_steps: int,
                  energy_weight: float = 0,
-                 energy_threshold: float = 0,
+                 max_energy: float = 0,
                  step_duration: float = 1):
         assert isinstance(init_state, Qobj)
         assert init_state.isket
@@ -177,7 +177,7 @@ class InfidelityOptimizer:
         self._target_state = target_state.full()
         self._num_steps = num_steps
         self._energy_weight = energy_weight
-        self._energy_threshold = energy_threshold
+        self._max_energy = max_energy
         self._step_duration = step_duration
 
         self._c_ops = [op.full() for op in interaction.control_operators]
@@ -271,12 +271,33 @@ class InfidelityOptimizer:
         phase = np.exp(1j * phase_vec.reshape((self._num_steps, len(self._c_ops))))
         return mag, phase
 
-    def random_param_vec(self):
-        max_mag = 1.0
-        mag = np.random.rand(self._num_steps * len(self._c_ops)) * max_mag
+    def random_param_vec(self, amp_max=1.0, fixed_energy=None):
+        mag = np.random.rand(self._num_steps * len(self._c_ops)) * amp_max
         phase = (np.random.rand(self._num_steps * len(self._c_ops)) - 0.5) * 2 * np.pi
         param_vec = np.concatenate((mag, phase))
+        if fixed_energy is not None:
+            energy = self.param_vec_energy(param_vec)
+            param_vec[:3*self.num_steps] *= sqrt(fixed_energy/energy)
         return param_vec
+
+    def param_vec_energy(self, param_vec):
+        all_amps = self._param_vec_to_all_amps(param_vec)
+        eta = self._interaction.lamb_dicke
+        energy = np.sum(np.abs(all_amps) ** 2 * np.array([eta ** 2, 1, 1]))
+        return energy
+
+    def infidelity(self, param_vec):
+        all_amps = self._param_vec_to_all_amps(param_vec)
+        evolved_state = self._init_state
+        for j in range(self._num_steps):
+            evolved_state = self._interaction.evolve(evolved_state, all_amps[j], self._step_duration)
+        infidelity = 1 - abs(vdot(self._target_state, evolved_state))
+        return infidelity
+
+    def _check_truncation(self, state):
+        num_focks = self._interaction.num_focks
+        if abs(state[-1])**2 > self._tol or abs(state[num_focks - 1])**2 > self._tol:
+            raise ValueError("Truncation too low for tol={:}.".format(self._tol))
 
     def cost_func(self, param_vec) -> float:
         all_amps = self._param_vec_to_all_amps(param_vec)
@@ -284,20 +305,13 @@ class InfidelityOptimizer:
         for j in range(self._num_steps):
             evolved_state = self._interaction.evolve(evolved_state, all_amps[j], self._step_duration)
 
-        assert abs(evolved_state[-1]) < SQEPS / self.num_steps
-        assert abs(evolved_state[self.interaction.num_focks-1]) < SQEPS / self.num_steps
+        self._check_truncation(evolved_state)
 
         self._cache_param_vec = param_vec
         self._cache_evolved_state = evolved_state
 
-
-        eta = self.interaction.lamb_dicke
-        energy = np.sum(np.abs(all_amps)**2 * np.array([eta**2, 1, 1]))
-
         #return 1 - abs(self._target_state.overlap(state)) ** 2
-        infidelity = 1 - abs(vdot(self._target_state, evolved_state))
-        energy_term = self._energy_weight * relu(energy, self._energy_threshold)
-        return infidelity + energy_term
+        return 1 - abs(vdot(self._target_state, evolved_state))
 
     def cost_grad(self, param_vec):
         """
@@ -366,8 +380,6 @@ class InfidelityOptimizer:
             right = dot(Udag, right)
 
         eta = self.interaction.lamb_dicke
-        energy = np.sum(np.abs(all_amps) ** 2 * np.array([eta ** 2, 1, 1]))
-        grad_mag += self._energy_weight * relu_der(energy, self._energy_threshold) * 2 * all_mags * np.array([eta**2, 1, 1])
 
         grad = np.concatenate((grad_mag.flatten(), grad_phase.flatten()))
     
@@ -378,13 +390,28 @@ class InfidelityOptimizer:
             notes = {}
         init_param_vec = self.random_param_vec()
         notes = {"cost_func": "infidelity"}
-        result = minimize_bfgs(self.cost_func, init_param_vec, grad=self.cost_grad, notes=notes)
-        self._optim_records.append(result)
+        record = minimize_bfgs(self.cost_func, init_param_vec, grad=self.cost_grad, notes=notes)
+        self._optim_records.append(record)
+        return record
+
+    def optimize_constrain_energy(self, max_energy, init_param_vec=None, tol=1e-8):
+        self._tol = tol
+        if init_param_vec is None:
+            init_param_vec = self.random_param_vec(fixed_energy=max_energy)
+
+        eta = self._interaction.lamb_dicke
+
+        weights = np.zeros(6*self.num_steps)
+        weights[:3*self.num_steps] = 1
+        weights[:3*self.num_steps:3] = eta ** 2
+
+        cons = [{"type": "ineq",
+                 "fun": lambda x: max_energy - np.sum(x ** 2 * weights),
+                 "jac": lambda x: -2 * x * weights}]
+        options = {"maxiter": 1000, "disp": True}
+        result = minimize(self.cost_func, init_param_vec, tol=tol,
+                          jac=self.cost_grad, constraints=cons, options=options)
         return result
-
-    def optimize_global(self, notes: dict = None):
-        pass
-
 
 
 class OptimizeRecord:
