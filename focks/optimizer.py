@@ -286,6 +286,11 @@ class InfidelityOptimizer:
         energy = np.sum(np.abs(all_amps) ** 2 * np.array([eta ** 2, 1, 1]))
         return energy
 
+    def param_vec_prep_time(self, param_vec):
+        eta = self._interaction.lamb_dicke
+        weights = np.array([eta ** 2, 1, 1])
+        return np.sum(np.sum(param_vec[0:3 * self._num_steps].reshape((-1, 3)) ** 2 * weights, axis=1) ** 0.5)
+
     def infidelity(self, param_vec):
         all_amps = self._param_vec_to_all_amps(param_vec)
         evolved_state = self._init_state
@@ -394,7 +399,7 @@ class InfidelityOptimizer:
         self._optim_records.append(record)
         return record
 
-    def optimize_constrain_energy(self, max_energy, init_param_vec=None, tol=1e-8):
+    def optimize_constrain_energy(self, max_energy, init_param_vec=None, tol=1e-5, maxiter=1000):
         self._tol = tol
         if init_param_vec is None:
             init_param_vec = self.random_param_vec(fixed_energy=max_energy)
@@ -408,7 +413,23 @@ class InfidelityOptimizer:
         cons = [{"type": "ineq",
                  "fun": lambda x: max_energy - np.sum(x ** 2 * weights),
                  "jac": lambda x: -2 * x * weights}]
-        options = {"maxiter": 1000, "disp": True}
+        options = {"maxiter": maxiter, "disp": True}
+        result = minimize(self.cost_func, init_param_vec, tol=tol,
+                          jac=self.cost_grad, constraints=cons, options=options)
+        return result
+
+    def optimize_constrain_prep_time(self, max_prep_time, init_param_vec=None, tol=1e-5, maxiter=1000):
+        self._tol = tol
+
+        if init_param_vec is None:
+            init_param_vec = self.random_param_vec()
+            amps = self._param_vec_to_all_amps(init_param_vec)
+            prep_time = self.param_vec_prep_time(init_param_vec)
+            init_param_vec[0:3*self._num_steps] *= max_prep_time/prep_time
+
+        cons = [{"type": "ineq",
+                 "fun": lambda x: max_prep_time - self.param_vec_prep_time(x)}]
+        options = {"maxiter": maxiter, "disp": True}
         result = minimize(self.cost_func, init_param_vec, tol=tol,
                           jac=self.cost_grad, constraints=cons, options=options)
         return result

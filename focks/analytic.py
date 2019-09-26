@@ -17,11 +17,11 @@ def find_coupling_stregnth(alpha, beta, target):
         raise Exception("Aurgment `target` must be 'e' or 'g'")
     return mag, phase
 
-def find_energy_bound(interaction, init_state):
+def find_prep_time_bound(interaction, init_state):
     num_focks = interaction.num_focks
     state = init_state
-    # First step: use red all the way to find a upper bound to the minimum energy
-    total_energy = 0
+    # First step: use red all the way to find a upper bound to the minimum prep_time
+    total_prep_time = 0
     pulse_sequence = []
     e, g = interaction.eigenstate_generators
     for n in reversed(range(num_focks)):
@@ -33,7 +33,7 @@ def find_energy_bound(interaction, init_state):
         pulse = [amp, 0, 0]
 
         state = interaction.evolve(state, pulse)
-        total_energy += abs(amp)**2 * interaction.lamb_dicke**2
+        total_prep_time += abs(amp) * interaction.lamb_dicke
         pulse_sequence.append(pulse)
 
         if n == 0:
@@ -48,23 +48,23 @@ def find_energy_bound(interaction, init_state):
         pulse = [0, amp, 0]
 
         state = interaction.evolve(state, pulse)
-        total_energy += abs(amp)**2
+        total_prep_time += abs(amp)
         pulse_sequence.append(pulse)
 
     assert abs(abs(g(0).overlap(state))**2 - 1) < SQEPS, "Final state should be |g0>"
 
-    energy_bound = total_energy
+    prep_time_bound = total_prep_time
     pulse_sequence_bound = pulse_sequence
-    print("The upper bound of the minimum energy is:\n{:}".format(energy_bound))
+    print("The upper bound of the minimum prep_time is:\n{:}".format(prep_time_bound))
     print("The upper bound pulse sequence is:")
     for pulse in pulse_sequence_bound:
         c_idx = int(np.argmax(np.abs(pulse)))
         print("{:} {:.5f} {:+.5f}π".format(['c', 'r', 'b'][c_idx], np.abs(pulse[c_idx]), angle(pulse[c_idx]) / pi))
-    return energy_bound, pulse_sequence_bound
+    return prep_time_bound, pulse_sequence_bound
 
-def find_minimum_energy(interaction, init_state):
+def find_minimum_prep_time(interaction, init_state):
     e, g = interaction.eigenstate_generators
-    energy_bound, pulse_sequence_bound = find_energy_bound(interaction, init_state)
+    prep_time_bound, pulse_sequence_bound = find_prep_time_bound(interaction, init_state)
     num_focks = interaction.num_focks
 
     nodes = [(init_state, [])]
@@ -72,9 +72,12 @@ def find_minimum_energy(interaction, init_state):
     for n in reversed(range(num_focks)):
         for node in nodes:
             state, pulse_sequence = node
-            energy = interaction.pulse_sequence_energy(pulse_sequence)
+            if len(pulse_sequence) == 0:
+                prep_time = 0
+            else:
+                prep_time = np.sum(np.abs(pulse_sequence) * np.array([interaction.lamb_dicke, 1, 1]))
 
-            if energy >= energy_bound:
+            if prep_time >= prep_time_bound:
                 continue
 
             ###############################################################
@@ -149,20 +152,20 @@ def find_minimum_energy(interaction, init_state):
         nodes = new_nodes
         new_nodes = []
 
-    min_energy = np.inf
+    min_prep_time = np.inf
     min_pulse_sequence = None
 
     for node in nodes:
         state, pulse_sequence = node
         assert abs(abs(g(0).overlap(state)) ** 2 - 1) < SQEPS, "Final state should be |g0>"
-        energy = interaction.pulse_sequence_energy(pulse_sequence)
+        prep_time = np.sum(np.abs(pulse_sequence) * np.array([interaction.lamb_dicke, 1, 1]))
 
-        if energy < min_energy:
-            min_energy = energy
+        if prep_time < min_prep_time:
+            min_prep_time = prep_time
             min_pulse_sequence = pulse_sequence
 
 
-    return min_energy, min_pulse_sequence
+    return min_prep_time, min_pulse_sequence
 
 if __name__ == '__main__':
     init_state = pickle.load(open('/home/kin/urop/focks/data/states/fl4.pickle', 'rb'))
@@ -172,10 +175,10 @@ if __name__ == '__main__':
     interaction = LaserInteraction(num_focks, lamb_dicke)
     e, g = interaction.eigenstate_generators
 
-    minimum_energy, minimum_pulse_sequence = find_minimum_energy(interaction, init_state)
+    minimum_prep_time, minimum_pulse_sequence = find_minimum_prep_time(interaction, init_state)
 
-    print("The minimum energy is:\n{:}".format(minimum_energy))
-    print("The minimum energy pulse sequence is:")
+    print("The minimum prep_time is:\n{:}".format(minimum_prep_time))
+    print("The minimum prep_time pulse sequence is:")
     for pulse in minimum_pulse_sequence:
         c_idx = int(np.argmax(np.abs(pulse)))
         print("{:} {:.5f} {:+.5f}π".format(['c', 'r', 'b'][c_idx], np.abs(pulse[c_idx]), angle(pulse[c_idx]) / pi))

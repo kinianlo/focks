@@ -262,3 +262,14 @@ class LaserInteraction:
             return 0
         eta = self._lamb_dicke
         return np.sum(np.abs(pulse_sequence) ** 2 * np.array([eta ** 2, 1, 1]))
+    
+    def pulse_sequence_prep_time(self, pulse_sequence):
+        if len(pulse_sequence) == 0:
+            return 0
+        eta = self._lamb_dicke
+        weights = np.array([eta**2, 1, 1])
+        return np.sum(np.sum(np.abs(pulse_sequence).reshape((-1, 3))**2 * weights,
+                                                             axis=1)**0.5)
+
+
+

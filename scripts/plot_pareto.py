@@ -3,8 +3,10 @@ import os
 import json
 import matplotlib.pyplot as plt
 import numpy as np
+import pickle
 
 path_to_job = sys.argv[1]
+path_to_job = "/home/kin/urop/jobs/fl4_3"
 
 solutions = {}
 paretos = {}
@@ -17,8 +19,8 @@ for sub_job in os.listdir(os.path.join(path_to_job, 'outputs')):
     if not os.path.isdir(os.path.join(path_to_job, 'outputs', sub_job)):
         continue
     try:
-        with open(os.path.join(path_to_job, 'outputs', sub_job, "summary.json"), 'r') as json_file:
-            summary = json.load(json_file)
+        with open(os.path.join(path_to_job, 'outputs', sub_job, "summary.pickle"), 'rb') as pickle_file:
+            summary = pickle.load(pickle_file)
     except:
         continue
     num_steps = summary["num_steps"]
@@ -61,9 +63,16 @@ for num_steps in solutions.keys():
 fig, axes = plt.subplots(1, 2, sharey=True)
 ax_linear, ax_log = axes
 ax_linear.set_xscale("linear")
+ax_linear.set_xlabel("infidelity")
 ax_log.set_xscale("log")
+ax_log.set_xlabel("infidelity")
+ax_linear.set_ylabel("energy")
+
+ax_linear.axhline()
+
 ax_linear.grid()
 ax_log.grid()
+
 for num_steps in sorted(paretos.keys()):
     if num_steps > 100:
         continue
